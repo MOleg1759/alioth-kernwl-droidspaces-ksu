@@ -1,0 +1,86 @@
+name: Build Alioth Kernel (DroidSpaces + KernelSU)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Install Build Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential bc bison flex libssl-dev git libelf-dev python3 zip gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+      - name: Setup Proton Clang
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+
+      - name: Clone LineageOS SM8250 Kernel
+        run: |
+          git clone --depth=1 https://github.com/LineageOS/android_kernel_xiaomi_sm8250.git -b lineage-22.2 kernel
+
+      - name: Setup KernelSU
+        run: |
+          cd kernel
+          # Интеграция драйвера KernelSU в дерево ядра
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+
+      - name: Patch Defconfig (DroidSpaces + KSU)
+        run: |
+          cd kernel
+          cat << 'EOF' >> arch/arm64/configs/vendor/alioth_defconfig
+
+          # --- KernelSU ---
+          CONFIG_KSU=y
+
+          # --- DroidSpaces / LXC Support ---
+          CONFIG_SYSVIPC=y
+          CONFIG_POSIX_MQUEUE=y
+          CONFIG_NAMESPACES=y
+          CONFIG_UTS_NS=y
+          CONFIG_IPC_NS=y
+          CONFIG_PID_NS=y
+          CONFIG_NET_NS=y
+          CONFIG_USER_NS=y
+          CONFIG_CGROUPS=y
+          CONFIG_CGROUP_PIDS=y
+          CONFIG_CGROUP_DEVICE=y
+          CONFIG_CGROUP_FREEZER=y
+          CONFIG_CPUSETS=y
+          CONFIG_DEVTMPFS=y
+          CONFIG_DEVTMPFS_MOUNT=y
+          CONFIG_VETH=y
+          CONFIG_BRIDGE=y
+          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+          EOF
+
+      - name: Compile Kernel Image
+        run: |
+          cd kernel
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          make O=out vendor/alioth_defconfig
+          make -j$(nproc) O=out \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            Image
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git ak3
+          cd ak3
+          cp ../kernel/out/arch/arm64/boot/Image .
+          sed -i 's/device.name1=.*/device.name1=alioth/' anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=aliothin/' anykernel.sh
+          zip -r9 ../AnyKernel3-Alioth-DroidSpaces-KSU.zip * -x .git README.md *placeholder
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-Alioth-DroidSpaces-KSU
+          path: AnyKernel3-Alioth-DroidSpaces-KSU.zip
