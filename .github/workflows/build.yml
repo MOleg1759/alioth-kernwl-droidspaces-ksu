@@ -23,37 +23,45 @@ jobs:
       - name: Setup KernelSU
         run: |
           cd kernel
-          # Интеграция драйвера KernelSU в дерево ядра
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
 
-      - name: Patch Defconfig (DroidSpaces + KSU)
+      - name: Configure Kernel (DroidSpaces, KSU & Fix VDSO)
         run: |
           cd kernel
-          cat << 'EOF' >> arch/arm64/configs/vendor/alioth_defconfig
+          export ARCH=arm64
+          export SUBARCH=arm64
 
-          # --- KernelSU ---
-          CONFIG_KSU=y
+          # Отключаем сбойный vdso32 в исходном дефконфиге
+          sed -i 's/CONFIG_COMPAT_VDSO=y/# CONFIG_COMPAT_VDSO is not set/' arch/arm64/configs/vendor/alioth_defconfig
 
-          # --- DroidSpaces / LXC Support ---
-          CONFIG_SYSVIPC=y
-          CONFIG_POSIX_MQUEUE=y
-          CONFIG_NAMESPACES=y
-          CONFIG_UTS_NS=y
-          CONFIG_IPC_NS=y
-          CONFIG_PID_NS=y
-          CONFIG_NET_NS=y
-          CONFIG_USER_NS=y
-          CONFIG_CGROUPS=y
-          CONFIG_CGROUP_PIDS=y
-          CONFIG_CGROUP_DEVICE=y
-          CONFIG_CGROUP_FREEZER=y
-          CONFIG_CPUSETS=y
-          CONFIG_DEVTMPFS=y
-          CONFIG_DEVTMPFS_MOUNT=y
-          CONFIG_VETH=y
-          CONFIG_BRIDGE=y
-          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
-          EOF
+          # Генерируем базовый .config
+          make O=out vendor/alioth_defconfig
+
+          # Отключаем COMPAT_VDSO и применяем параметры DroidSpaces + KSU через kconfig
+          ./scripts/config --file out/.config \
+            --disable COMPAT_VDSO \
+            --enable KSU \
+            --enable SYSVIPC \
+            --enable POSIX_MQUEUE \
+            --enable NAMESPACES \
+            --enable UTS_NS \
+            --enable IPC_NS \
+            --enable PID_NS \
+            --enable NET_NS \
+            --enable USER_NS \
+            --enable CGROUPS \
+            --enable CGROUP_PIDS \
+            --enable CGROUP_DEVICE \
+            --enable CGROUP_FREEZER \
+            --enable CPUSETS \
+            --enable DEVTMPFS \
+            --enable DEVTMPFS_MOUNT \
+            --enable VETH \
+            --enable BRIDGE \
+            --enable NETFILTER_XT_MATCH_ADDRTYPE
+
+          # Валидируем итоговый конфиг
+          make O=out olddefconfig
 
       - name: Compile Kernel Image
         run: |
@@ -61,13 +69,12 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export ARCH=arm64
           export SUBARCH=arm64
-          make O=out vendor/alioth_defconfig
+          
+          # Собираем ядро без форсирования LLVM_IAS во избежание сбоев ассемблера 4.19
           make -j$(nproc) O=out \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 \
-            LLVM_IAS=1 \
             Image
 
       - name: Package with AnyKernel3
