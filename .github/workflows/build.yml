@@ -100,8 +100,18 @@ jobs:
           git clone https://github.com/osm0sis/AnyKernel3.git ak3
           cd ak3
           cp ../kernel/out/arch/arm64/boot/Image .
+
+          # Настраиваем имена устройств для проверки
           sed -i 's/device.name1=.*/device.name1=alioth/' anykernel.sh
           sed -i 's/device.name2=.*/device.name2=aliothin/' anykernel.sh
+          sed -i 's/device.name3=.*/device.name3=POCO F3/' anykernel.sh
+          sed -i 's/device.name4=.*/device.name4=Redmi K40/' anykernel.sh
+
+          # Задаем правильный блок boot и автоматическое определение A/B слотов
+          sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;|block=boot;|' anykernel.sh
+          sed -i 's/is_slot_device=0;/is_slot_device=auto;/' anykernel.sh
+
+          # Собираем ZIP для рекавери
           zip -r9 ../AnyKernel3-Alioth-DroidSpaces-KSU.zip * -x .git README.md *placeholder
 
       - name: Upload Artifact
