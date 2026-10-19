@@ -31,10 +31,13 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
 
-          # 1. Отключаем COMPAT_VDSO во всех найденных конфигах дерева
+          # 1. Создаем выходной каталог для merge_config.sh и make
+          mkdir -p out
+
+          # 2. Отключаем COMPAT_VDSO во всех найденных конфигах дерева
           find arch/arm64/configs -type f \( -name "*defconfig*" -o -name "*.config" \) -exec sed -i 's/CONFIG_COMPAT_VDSO=y/# CONFIG_COMPAT_VDSO is not set/' {} +
 
-          # 2. Автоматически находим базовый дефконфиг Kona и фрагменты Xiaomi/Alioth
+          # 3. Находим базовый дефконфиг Kona и фрагменты Xiaomi/Alioth
           DEFCONFIG_BASE="arch/arm64/configs/vendor/kona-perf_defconfig"
           COMMON_CONFIG=$(find arch/arm64/configs -name "sm8250-common.config" | head -n 1)
           ALIOTH_CONFIG=$(find arch/arm64/configs -name "alioth.config" | head -n 1)
@@ -43,13 +46,14 @@ jobs:
           echo "Используется common: $COMMON_CONFIG"
           echo "Используется alioth: $ALIOTH_CONFIG"
 
-          # 3. Объединяем конфигурации через штатный скрипт ядра
+          # 4. Объединяем конфигурации
           ARCH=arm64 ./scripts/kconfig/merge_config.sh -O out \
             "$DEFCONFIG_BASE" \
             ${COMMON_CONFIG:+"$COMMON_CONFIG"} \
             ${ALIOTH_CONFIG:+"$ALIOTH_CONFIG"}
 
-          # 4. Принудительно включаем параметры DroidSpaces и KernelSU
+          # 5. Принудительно включаем параметры DroidSpaces и KernelSU
+          chmod +x ./scripts/config
           ./scripts/config --file out/.config \
             --disable COMPAT_VDSO \
             --enable KSU \
@@ -72,8 +76,9 @@ jobs:
             --enable BRIDGE \
             --enable NETFILTER_XT_MATCH_ADDRTYPE
 
-          # 5. Разрешаем зависимости Kconfig
+          # 6. Финализируем зависимости
           make O=out ARCH=arm64 olddefconfig
+
 
       - name: Compile Kernel Image
         run: |
