@@ -10,7 +10,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential bc bison flex libssl-dev git libelf-dev python3 zip gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          sudo apt install -y build-essential bc bison flex libssl-dev git libelf-dev python3 python-is-python3 zip cpio gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
       - name: Setup Proton Clang
         run: |
@@ -31,13 +31,25 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
 
-          # Отключаем сбойный vdso32 в исходном дефконфиге
-          sed -i 's/CONFIG_COMPAT_VDSO=y/# CONFIG_COMPAT_VDSO is not set/' arch/arm64/configs/vendor/alioth_defconfig
+          # 1. Отключаем COMPAT_VDSO во всех найденных конфигах дерева
+          find arch/arm64/configs -type f \( -name "*defconfig*" -o -name "*.config" \) -exec sed -i 's/CONFIG_COMPAT_VDSO=y/# CONFIG_COMPAT_VDSO is not set/' {} +
 
-          # Генерируем базовый .config
-          make O=out vendor/alioth_defconfig
+          # 2. Автоматически находим базовый дефконфиг Kona и фрагменты Xiaomi/Alioth
+          DEFCONFIG_BASE="arch/arm64/configs/vendor/kona-perf_defconfig"
+          COMMON_CONFIG=$(find arch/arm64/configs -name "sm8250-common.config" | head -n 1)
+          ALIOTH_CONFIG=$(find arch/arm64/configs -name "alioth.config" | head -n 1)
 
-          # Отключаем COMPAT_VDSO и применяем параметры DroidSpaces + KSU через kconfig
+          echo "Используется база: $DEFCONFIG_BASE"
+          echo "Используется common: $COMMON_CONFIG"
+          echo "Используется alioth: $ALIOTH_CONFIG"
+
+          # 3. Объединяем конфигурации через штатный скрипт ядра
+          ARCH=arm64 ./scripts/kconfig/merge_config.sh -O out \
+            "$DEFCONFIG_BASE" \
+            ${COMMON_CONFIG:+"$COMMON_CONFIG"} \
+            ${ALIOTH_CONFIG:+"$ALIOTH_CONFIG"}
+
+          # 4. Принудительно включаем параметры DroidSpaces и KernelSU
           ./scripts/config --file out/.config \
             --disable COMPAT_VDSO \
             --enable KSU \
@@ -60,8 +72,8 @@ jobs:
             --enable BRIDGE \
             --enable NETFILTER_XT_MATCH_ADDRTYPE
 
-          # Валидируем итоговый конфиг
-          make O=out olddefconfig
+          # 5. Разрешаем зависимости Kconfig
+          make O=out ARCH=arm64 olddefconfig
 
       - name: Compile Kernel Image
         run: |
@@ -70,8 +82,9 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # Собираем ядро без форсирования LLVM_IAS во избежание сбоев ассемблера 4.19
           make -j$(nproc) O=out \
+            ARCH=arm64 \
+            SUBARCH=arm64 \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
